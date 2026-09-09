@@ -9,29 +9,35 @@ const ALLOWED = new Map([
   ['image/gif', 'gif'],
 ])
 const MAX_BYTES = 5_000_000
-const UPLOAD_ROOT = path.resolve(process.cwd(), 'uploads', 'payments')
+
+function proofFilename(relative: string) {
+  const normalized = relative.replaceAll('\\', '/')
+  if (!normalized.startsWith('uploads/payments/')) throw new ApiError(400, 'Invalid proof path')
+  const filename = path.posix.basename(normalized)
+  if (!filename || filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    throw new ApiError(400, 'Invalid proof path')
+  }
+  return filename
+}
+
+function proofAbsolutePath(filename: string) {
+  return path.join(process.cwd(), 'uploads', 'payments', filename)
+}
 
 export async function savePaymentProof(paymentId: string, file: File) {
   const ext = ALLOWED.get(file.type)
   if (!ext) throw new ApiError(400, 'Upload a JPG, PNG, WEBP, or GIF screenshot')
   if (file.size > MAX_BYTES) throw new ApiError(400, 'Screenshot must be smaller than 5 MB')
-  const relative = path.posix.join('uploads/payments', `${paymentId}-${Date.now()}.${ext}`)
-  const absolute = resolveProofPath(relative)
+  const filename = `${paymentId}-${Date.now()}.${ext}`
+  const relative = `uploads/payments/${filename}`
+  const absolute = proofAbsolutePath(filename)
   await mkdir(path.dirname(absolute), { recursive: true })
   await writeFile(absolute, Buffer.from(await file.arrayBuffer()))
   return relative
 }
 
 export function resolveProofPath(relative: string) {
-  if (!relative.replaceAll('\\', '/').startsWith('uploads/payments/')) {
-    throw new ApiError(400, 'Invalid proof path')
-  }
-  const absolute = path.resolve(process.cwd(), relative)
-  const relativeToRoot = path.relative(UPLOAD_ROOT, absolute)
-  if (!relativeToRoot || relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
-    throw new ApiError(400, 'Invalid proof path')
-  }
-  return absolute
+  return proofAbsolutePath(proofFilename(relative))
 }
 
 export async function readPaymentProof(relative: string) {
