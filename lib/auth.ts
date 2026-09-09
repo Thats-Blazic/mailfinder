@@ -43,67 +43,94 @@ export async function destroySession() {
   store.delete(SESSION_COOKIE)
 }
 
+function isNextRedirect(error: unknown) {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'digest' in error &&
+      typeof (error as { digest: unknown }).digest === 'string' &&
+      String((error as { digest: string }).digest).startsWith('NEXT_REDIRECT'),
+  )
+}
+
 export async function getCurrentUser() {
-  await ensureDatabase()
-  const token = (await cookies()).get(SESSION_COOKIE)?.value
-  if (!token) return null
-
-  const session = await prisma.session.findUnique({
-    where: { tokenHash: hashToken(token) },
-    include: {
-      user: {
-        include: {
-          plans: {
-            where: { status: 'ACTIVE' },
-            include: { plan: true },
-            orderBy: { expiresAt: 'desc' },
-            take: 1,
-          },
-        },
-      },
-    },
-  })
-
-  if (!session || session.expiresAt <= new Date()) {
-    if (session) await prisma.session.delete({ where: { id: session.id } })
+  try {
+    await ensureDatabase()
+  } catch (error) {
+    console.error('Database is not ready', error)
     return null
   }
 
-  if (session.user.status === AccountStatus.DISABLED) return null
+  try {
+    const token = (await cookies()).get(SESSION_COOKIE)?.value
+    if (!token) return null
 
-  const activePlan = session.user.plans[0]
-  if (activePlan && !isPlanUsable(activePlan)) {
-    await prisma.$transaction(async (tx) => {
-      const changed = await tx.userPlan.updateMany({
-        where: { id: activePlan.id, status: 'ACTIVE' },
-        data: { status: 'EXPIRED' },
-      })
-      if (!changed.count) return
-      await tx.user.update({
-        where: { id: session.user.id },
-        data: { status: 'INACTIVE' },
-      })
-      await tx.notification.create({
-        data: {
-          userId: session.user.id,
-          type: 'PLAN_EXPIRED',
-          title: 'Plan expired',
-          message: 'Your Ghost Mail Finder plan has expired. Contact an administrator to reactivate access.',
+    const session = await prisma.session.findUnique({
+      where: { tokenHash: hashToken(token) },
+      include: {
+        user: {
+          include: {
+            plans: {
+              where: { status: 'ACTIVE' },
+              include: { plan: true },
+              orderBy: { expiresAt: 'desc' },
+              take: 1,
+            },
+          },
         },
-      })
+      },
     })
-    session.user.plans = []
-  }
 
-  return session.user
+    if (!session || session.expiresAt <= new Date()) {
+      if (session) await prisma.session.delete({ where: { id: session.id } })
+      return null
+    }
+
+    if (session.user.status === AccountStatus.DISABLED) return null
+
+    const activePlan = session.user.plans[0]
+    if (activePlan && !isPlanUsable(activePlan)) {
+      await prisma.$transaction(async (tx) => {
+        const changed = await tx.userPlan.updateMany({
+          where: { id: activePlan.id, status: 'ACTIVE' },
+          data: { status: 'EXPIRED' },
+        })
+        if (!changed.count) return
+        await tx.user.update({
+          where: { id: session.user.id },
+          data: { status: 'INACTIVE' },
+        })
+        await tx.notification.create({
+          data: {
+            userId: session.user.id,
+            type: 'PLAN_EXPIRED',
+            title: 'Plan expired',
+            message: 'Your Ghost Mail Finder plan has expired. Contact an administrator to reactivate access.',
+          },
+        })
+      })
+      session.user.plans = []
+    }
+
+    return session.user
+  } catch (error) {
+    console.error('Session lookup failed', error)
+    return null
+  }
 }
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>
 
 export async function requireUser() {
-  const user = await getCurrentUser()
-  if (!user) redirect('/login')
-  return user
+  try {
+    const user = await getCurrentUser()
+    if (!user) redirect('/login')
+    return user
+  } catch (error) {
+    if (isNextRedirect(error)) throw error
+    console.error('requireUser failed', error)
+    redirect('/login')
+  }
 }
 
 export async function requireAdmin() {

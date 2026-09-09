@@ -8,12 +8,19 @@ function isPostgresUrl(url: string) {
   return /^(postgres|postgresql):\/\//i.test(url)
 }
 
+function withPostgresParams(url: string) {
+  if (!isPostgresUrl(url)) return url
+  const join = url.includes('?') ? '&' : '?'
+  if (!/[?&]sslmode=/i.test(url)) url += `${join}sslmode=require`
+  return url
+}
+
 function databaseUrl() {
   const fromEnv = process.env.DATABASE_URL || 'file:./prisma/dev.db'
   if (process.env.VERCEL && fromEnv.startsWith('file:')) {
     return 'file:/tmp/mailfinder.db'
   }
-  return fromEnv
+  return withPostgresParams(fromEnv)
 }
 
 export const prisma =
@@ -39,6 +46,7 @@ async function bootstrap() {
     const existing = await prisma.user.findFirst({ select: { id: true } })
     if (!existing) await seedApp(prisma)
   } catch (error) {
+    console.error('Database bootstrap failed', error)
     if (!process.env.VERCEL || isPostgresUrl(databaseUrl())) throw error
     await applySqliteSchema()
     await seedApp(prisma)

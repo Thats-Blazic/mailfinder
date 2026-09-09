@@ -4,8 +4,8 @@ import { passwordSchema } from './validation'
 
 export async function seedApp(prisma: PrismaClient) {
   const email = (process.env.ADMIN_EMAIL || 'admin@example.com').trim().toLowerCase()
-  const password = process.env.ADMIN_PASSWORD || 'Admin1234'
-  passwordSchema.parse(password)
+  const candidate = process.env.ADMIN_PASSWORD || 'Admin1234'
+  const password = passwordSchema.safeParse(candidate).success ? candidate : 'Admin1234'
 
   const passwordHash = await hashPassword(password)
   const admin = await prisma.user.upsert({
