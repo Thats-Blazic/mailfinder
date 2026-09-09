@@ -8,6 +8,7 @@ export type CrawlSettings = {
   maxPages: number
   timeoutMs: number
   mode: 'FAST' | 'STANDARD' | 'DEEP'
+  deadlineAt?: number
 }
 
 export type CrawlResult = ExtractedEmail & { sourceUrl: string }
@@ -308,25 +309,39 @@ const seedPaths = [
   '/marketing',
 ]
 
-export async function crawlDomain(hostname: string, settings: CrawlSettings) {
+export type CrawlResumeState = {
+  visited: string[]
+  queue: QueuedPage[]
+  pagesScanned: number
+  seeded: boolean
+}
+
+export async function crawlDomain(hostname: string, settings: CrawlSettings, resume?: CrawlResumeState | null) {
   const rootHostname = hostname.replace(/^www\./, '').toLowerCase()
-  const visited = new Set<string>()
-  const queue: QueuedPage[] = []
-  enqueuePage(queue, `https://${rootHostname}/`, HOMEPAGE_SCORE, visited)
-  for (const path of seedPaths) {
-    const url = `https://${rootHostname}${path}`
-    enqueuePage(queue, url, pagePriority(url), visited)
-  }
-  if (settings.mode !== 'FAST') {
-    for (const page of await discoverSitemap(rootHostname, settings.timeoutMs)) {
-      enqueuePage(queue, page, pagePriority(page), visited)
+  const visited = new Set(resume?.visited || [])
+  const queue: QueuedPage[] = resume?.queue ? resume.queue.map((item) => ({ ...item })) : []
+  if (!resume?.seeded) {
+    enqueuePage(queue, `https://${rootHostname}/`, HOMEPAGE_SCORE, visited)
+    for (const path of seedPaths) {
+      const url = `https://${rootHostname}${path}`
+      enqueuePage(queue, url, pagePriority(url), visited)
+    }
+    if (settings.mode !== 'FAST') {
+      for (const page of await discoverSitemap(rootHostname, settings.timeoutMs)) {
+        enqueuePage(queue, page, pagePriority(page), visited)
+      }
     }
   }
   const collected: CrawlResult[] = []
   let lastHomepageError: unknown
-  let pagesScanned = 0
+  let pagesScanned = resume?.pagesScanned || 0
+  let timedOut = false
 
   while (queue.length && pagesScanned < settings.maxPages) {
+    if (settings.deadlineAt && Date.now() >= settings.deadlineAt) {
+      timedOut = true
+      break
+    }
     const current = dequeuePage(queue)
     const key = pageKey(current.url)
     if (visited.has(key)) continue
@@ -350,9 +365,16 @@ export async function crawlDomain(hostname: string, settings: CrawlSettings) {
     }
   }
 
-  if (pagesScanned === 0 && lastHomepageError) throw lastHomepageError
+  if (pagesScanned === 0 && lastHomepageError && !timedOut) throw lastHomepageError
   return {
     pagesScanned,
+    timedOut,
+    state: {
+      visited: [...visited],
+      queue,
+      pagesScanned,
+      seeded: true,
+    } satisfies CrawlResumeState,
     results: collected.filter(
       (entry, index, entries) => entries.findIndex((other) => other.email === entry.email) === index,
     ),

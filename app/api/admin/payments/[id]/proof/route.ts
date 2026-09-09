@@ -11,12 +11,17 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   try {
     await requireApiUser(UserRole.ADMIN)
     const { id } = paramsSchema.parse(await context.params)
-    const payment = await prisma.payment.findUnique({ where: { id }, select: { proofImage: true } })
-    if (!payment?.proofImage) throw new ApiError(404, 'Payment screenshot not found')
-    const file = await readPaymentProof(payment.proofImage)
+    const payment = await prisma.payment.findUnique({
+      where: { id },
+      select: { proofImage: true, proofBytes: true, proofMime: true },
+    })
+    if (!payment?.proofImage && !payment?.proofBytes) throw new ApiError(404, 'Payment screenshot not found')
+    const file = payment.proofBytes
+      ? Buffer.from(payment.proofBytes)
+      : await readPaymentProof(payment.proofImage!)
     return new NextResponse(Uint8Array.from(file), {
       headers: {
-        'Content-Type': proofContentType(payment.proofImage),
+        'Content-Type': proofContentType(payment.proofImage || '', payment.proofMime),
         'Cache-Control': 'private, max-age=60',
       },
     })

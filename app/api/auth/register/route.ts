@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSession, hashPassword } from '@/lib/auth'
 import { ApiError, apiError, clientIp, rateLimit, requireSameOrigin } from '@/lib/api'
-import { prisma } from '@/lib/db'
+import { ensureDatabase, prisma } from '@/lib/db'
 import { getSetting } from '@/lib/settings'
 import { registerSchema } from '@/lib/validation'
 
 export async function POST(request: NextRequest) {
   try {
+    await ensureDatabase()
     requireSameOrigin(request)
     rateLimit(`auth:register:${clientIp(request) ?? 'unknown'}`, 5, 60 * 60 * 1000)
 

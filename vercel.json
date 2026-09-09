@@ -1,3 +1,3 @@
 {
-  "buildCommand": "npx prisma generate && npx next build"
+  "buildCommand": "node scripts/prisma-generate.mjs && next build"
 }

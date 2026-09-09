@@ -6,6 +6,7 @@ uploads/
 
 prisma/*.db
 prisma/*.db-journal
+prisma/schema.build.prisma
 dev.db
 dev.db-journal
 

@@ -4,6 +4,8 @@ import { prisma } from '@/lib/db'
 import { createSearch } from '@/lib/searches'
 import { createSearchSchema } from '@/lib/validation'
 
+export const maxDuration = 60
+
 export async function GET(request: NextRequest) {
   try {
     const user = await requireApiUser()

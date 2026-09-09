@@ -53,6 +53,8 @@ export const SQLITE_INIT_STATEMENTS = [
     "walletAddress" TEXT NOT NULL,
     "transactionHash" TEXT,
     "proofImage" TEXT,
+    "proofBytes" BLOB,
+    "proofMime" TEXT,
     "telegramHandle" TEXT,
     "status" TEXT NOT NULL DEFAULT 'PENDING',
     "expiresAt" DATETIME NOT NULL,
@@ -105,6 +107,7 @@ export const SQLITE_INIT_STATEMENTS = [
     "status" TEXT NOT NULL DEFAULT 'QUEUED',
     "error" TEXT,
     "pagesScanned" INTEGER NOT NULL DEFAULT 0,
+    "crawlState" JSONB,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "Domain_searchId_fkey" FOREIGN KEY ("searchId") REFERENCES "Search" ("id") ON DELETE CASCADE ON UPDATE CASCADE

@@ -4,6 +4,10 @@ import { SQLITE_INIT_STATEMENTS } from './sqlite-init'
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
 
+function isPostgresUrl(url: string) {
+  return /^(postgres|postgresql):\/\//i.test(url)
+}
+
 function databaseUrl() {
   const fromEnv = process.env.DATABASE_URL || 'file:./prisma/dev.db'
   if (process.env.VERCEL && fromEnv.startsWith('file:')) {
@@ -35,7 +39,7 @@ async function bootstrap() {
     const existing = await prisma.user.findFirst({ select: { id: true } })
     if (!existing) await seedApp(prisma)
   } catch (error) {
-    if (!process.env.VERCEL) throw error
+    if (!process.env.VERCEL || isPostgresUrl(databaseUrl())) throw error
     await applySqliteSchema()
     await seedApp(prisma)
   }

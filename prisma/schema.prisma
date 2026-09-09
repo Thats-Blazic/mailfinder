@@ -183,6 +183,8 @@ model Payment {
   walletAddress   String
   transactionHash String?
   proofImage      String?
+  proofBytes      Bytes?
+  proofMime       String?
   telegramHandle  String?
   status          PaymentStatus @default(PENDING)
   expiresAt       DateTime
@@ -230,6 +232,7 @@ model Domain {
   status       DomainStatus  @default(QUEUED)
   error        String?
   pagesScanned Int           @default(0)
+  crawlState   Json?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   search       Search        @relation(fields: [searchId], references: [id], onDelete: Cascade)

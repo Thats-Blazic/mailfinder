@@ -1,5 +1,6 @@
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
-import { crawlDomain } from '@/lib/finder/crawler'
+import { crawlDomain, type CrawlResumeState } from '@/lib/finder/crawler'
 import { quotaForPlanName } from '@/lib/plans'
 
 export async function finalizeSearch(searchId: string) {
@@ -56,16 +57,23 @@ export async function processDomainById(domainId: string, attempt = 1) {
   if (!claimed) return
 
   const quota = quotaForPlanName(record.search.user.plans[0]?.plan.name)
+  const resume = record.crawlState as CrawlResumeState | null
   try {
-    const crawled = await crawlDomain(record.hostname, {
-      maxPages: quota.maxPages,
-      timeoutMs: 6_000,
-      mode: record.search.mode === 'FAST' ? 'FAST' : record.search.mode === 'STANDARD' ? 'STANDARD' : 'DEEP',
-    })
+    const crawled = await crawlDomain(
+      record.hostname,
+      {
+        maxPages: quota.maxPages,
+        timeoutMs: 6_000,
+        mode: record.search.mode === 'FAST' ? 'FAST' : record.search.mode === 'STANDARD' ? 'STANDARD' : 'DEEP',
+        deadlineAt: process.env.VERCEL ? Date.now() + 7_000 : undefined,
+      },
+      resume,
+    )
 
     await prisma.$transaction(async (tx) => {
       const currentSearch = await tx.search.findUnique({ where: { id: record.searchId }, select: { status: true } })
       if (currentSearch?.status === 'CANCELLED') return
+      const before = await tx.emailResult.count({ where: { domainId: record.id } })
       if (crawled.results.length) {
         for (const result of crawled.results) {
           await tx.emailResult.upsert({
@@ -92,25 +100,33 @@ export async function processDomainById(domainId: string, attempt = 1) {
           })
         }
       }
+      const after = await tx.emailResult.count({ where: { domainId: record.id } })
+      const incomplete = crawled.timedOut && crawled.pagesScanned < quota.maxPages && crawled.state.queue.length > 0
       await tx.domain.update({
         where: { id: record.id },
-        data: { status: 'COMPLETED', pagesScanned: crawled.pagesScanned },
+        data: incomplete
+          ? { status: 'QUEUED', pagesScanned: crawled.pagesScanned, crawlState: crawled.state }
+          : { status: 'COMPLETED', pagesScanned: crawled.pagesScanned, crawlState: Prisma.DbNull, error: null },
       })
       if (record.scanJob) {
         await tx.scanJob.update({
           where: { domainId: record.id },
-          data: { status: 'COMPLETED', completedAt: new Date() },
+          data: incomplete
+            ? { status: 'QUEUED', completedAt: null }
+            : { status: 'COMPLETED', completedAt: new Date() },
         })
       }
       await tx.search.update({
         where: { id: record.searchId },
         data: {
-          processedCount: { increment: 1 },
-          emailsFound: { increment: crawled.results.length },
+          emailsFound: { increment: after - before },
+          ...(!incomplete ? { processedCount: { increment: 1 } } : {}),
         },
       })
     })
-    await finalizeSearch(record.searchId)
+    if (!crawled.timedOut || crawled.pagesScanned >= quota.maxPages || crawled.state.queue.length === 0) {
+      await finalizeSearch(record.searchId)
+    }
     return { emailsFound: crawled.results.length }
   } catch (error) {
     const message = error instanceof Error ? error.message.slice(0, 500) : 'Unknown crawler error'
@@ -141,6 +157,35 @@ export async function processDomainById(domainId: string, attempt = 1) {
   }
 }
 
+export async function processSearchChunk(searchId: string, stopAt: number) {
+  await prisma.domain.updateMany({
+    where: {
+      searchId,
+      status: 'PROCESSING',
+      updatedAt: { lt: new Date(Date.now() - 30_000) },
+    },
+    data: { status: 'QUEUED' },
+  })
+  while (Date.now() < stopAt) {
+    const next = await prisma.domain.findFirst({
+      where: { searchId, status: 'QUEUED' },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    })
+    if (!next) {
+      await finalizeSearch(searchId)
+      return false
+    }
+    await processDomainById(next.id)
+    if (process.env.VERCEL) break
+  }
+  const remaining = await prisma.domain.count({
+    where: { searchId, status: 'QUEUED' },
+  })
+  if (remaining === 0) await finalizeSearch(searchId)
+  return remaining > 0
+}
+
 const runningSearches = new Set<string>()
 
 export async function runSearchLocally(searchId: string, concurrency = 3) {
@@ -156,7 +201,31 @@ export async function runSearchLocally(searchId: string, concurrency = 3) {
   }
 }
 
+async function triggerRemoteScan(searchId: string) {
+  const { publicAppUrl } = await import('@/lib/app-url')
+  const secret = process.env.AUTH_SECRET
+  if (!secret) return
+  await fetch(`${publicAppUrl()}/api/internal/scan`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-scan-secret': secret,
+    },
+    body: JSON.stringify({ searchId }),
+  })
+}
+
 export async function ensureSearchRunning(searchId: string) {
+  if (process.env.VERCEL) {
+    try {
+      const { after } = await import('next/server')
+      after(() => triggerRemoteScan(searchId))
+    } catch {
+      void triggerRemoteScan(searchId)
+    }
+    return
+  }
+
   if (runningSearches.has(searchId)) return
   const search = await prisma.search.findUnique({
     where: { id: searchId },
