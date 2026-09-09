@@ -1,3 +1,4 @@
 {
+  "installCommand": "PRISMA_SKIP_POSTINSTALL_GENERATE=1 npm install",
   "buildCommand": "node scripts/prisma-generate.mjs && next build"
 }

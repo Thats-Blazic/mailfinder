@@ -5,7 +5,7 @@ import { SQLITE_INIT_STATEMENTS } from './sqlite-init'
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
 
 function isPostgresUrl(url: string) {
-  return /^(postgres|postgresql):\/\//i.test(url)
+  return /^(postgres|postgresql|prisma\+postgres|prisma):\/\//i.test(url.trim())
 }
 
 function withPostgresParams(url: string) {

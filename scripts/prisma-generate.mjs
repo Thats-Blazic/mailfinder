@@ -3,23 +3,24 @@ import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 
-if (!process.env.DATABASE_URL) {
+const root = process.cwd()
+const url = (process.env.DATABASE_URL || '').trim().replace(/^['"]|['"]$/g, '')
+const postgres = /^(postgres|postgresql|prisma\+postgres|prisma):\/\//i.test(url)
+
+if (!url) {
   process.env.DATABASE_URL = 'file:./prisma/dev.db'
 }
 
-const root = process.cwd()
-const url = process.env.DATABASE_URL
-const postgres = /^(postgres|postgresql):\/\//i.test(url)
-const sourceSchema = readFileSync(path.join(root, 'prisma/schema.prisma'), 'utf8')
-const schemaPath = postgres
-  ? path.join(root, 'prisma/schema.build.prisma')
-  : path.join(root, 'prisma/schema.prisma')
+const schemaFile = path.join(root, 'prisma/schema.prisma')
+const sourceSchema = readFileSync(schemaFile, 'utf8')
+const provider = postgres ? 'postgresql' : 'sqlite'
+const patched = sourceSchema.replace(
+  /(datasource\s+db\s*\{[^}]*?provider\s*=\s*")(?:sqlite|postgresql)(")/,
+  `$1${provider}$2`,
+)
 
-if (postgres) {
-  writeFileSync(
-    schemaPath,
-    sourceSchema.replace(/provider\s*=\s*"(sqlite|postgresql)"/, 'provider = "postgresql"'),
-  )
+if (patched !== sourceSchema) {
+  writeFileSync(schemaFile, patched)
 }
 
 const require = createRequire(import.meta.url)
@@ -33,8 +34,8 @@ function run(args) {
   if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1)
 }
 
-run(['generate', `--schema=${schemaPath}`])
+run(['generate', `--schema=${schemaFile}`])
 
 if (process.env.VERCEL && postgres) {
-  run(['db', 'push', '--skip-generate', '--accept-data-loss', `--schema=${schemaPath}`])
+  run(['db', 'push', '--skip-generate', '--accept-data-loss', `--schema=${schemaFile}`])
 }
