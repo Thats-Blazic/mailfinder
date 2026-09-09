@@ -4,7 +4,7 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { AccountStatus, UserRole } from '@prisma/client'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { prisma } from '@/lib/db'
+import { ensureDatabase, prisma } from '@/lib/db'
 import { getEnv } from '@/lib/env'
 import { isPlanUsable } from '@/lib/plans'
 export { hashPassword, verifyPassword } from '@/lib/password'
@@ -44,6 +44,7 @@ export async function destroySession() {
 }
 
 export async function getCurrentUser() {
+  await ensureDatabase()
   const token = (await cookies()).get(SESSION_COOKIE)?.value
   if (!token) return null
 

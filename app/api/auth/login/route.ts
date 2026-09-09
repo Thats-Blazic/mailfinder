@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSession, hashPassword, verifyPassword } from '@/lib/auth'
 import { ApiError, apiError, clientIp, rateLimit, requireSameOrigin } from '@/lib/api'
-import { prisma } from '@/lib/db'
+import { ensureDatabase, prisma } from '@/lib/db'
 import { loginSchema } from '@/lib/validation'
 
 export async function POST(request: NextRequest) {
   try {
+    await ensureDatabase()
     requireSameOrigin(request)
     const ipAddress = clientIp(request)
     rateLimit(`auth:login:ip:${ipAddress ?? 'unknown'}`, 10, 15 * 60 * 1000)
