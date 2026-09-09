@@ -1,0 +1,330 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum AccountStatus {
+  INACTIVE
+  ACTIVE
+  DISABLED
+}
+
+enum UserPlanStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  MORE_INFO_REQUIRED
+}
+
+enum CreditTransactionType {
+  PLAN_GRANT
+  SEARCH_USAGE
+  ADMIN_ADD
+  ADMIN_REMOVE
+  ADMIN_RESET
+  REFUND
+}
+
+enum SearchStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ScanMode {
+  FAST
+  STANDARD
+  DEEP
+}
+
+enum DomainStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ScanJobStatus {
+  QUEUED
+  ACTIVE
+  COMPLETED
+  FAILED
+}
+
+enum NotificationType {
+  REGISTRATION
+  PAYMENT_SUBMITTED
+  PAYMENT_APPROVED
+  PAYMENT_REJECTED
+  PLAN_ACTIVATED
+  PLAN_EXPIRING
+  PLAN_EXPIRED
+  SEARCH_COMPLETED
+  SEARCH_FAILED
+}
+
+model User {
+  id                 String               @id @default(cuid())
+  name               String
+  email              String               @unique
+  passwordHash       String
+  role               UserRole             @default(USER)
+  status             AccountStatus        @default(INACTIVE)
+  creditBalance      Int                  @default(0)
+  creditsUsed        Int                  @default(0)
+  lastLoginAt        DateTime?
+  adminNotes         String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  sessions           Session[]
+  resetTokens        PasswordResetToken[]
+  plans              UserPlan[]           @relation("UserPlans")
+  assignedPlans      UserPlan[]           @relation("AssignedPlans")
+  searches           Search[]
+  payments           Payment[]            @relation("UserPayments")
+  reviewedPayments   Payment[]            @relation("ReviewedPayments")
+  creditTransactions CreditTransaction[]  @relation("UserCreditTransactions")
+  adminTransactions  CreditTransaction[]  @relation("AdminCreditTransactions")
+  notifications      Notification[]
+  auditLogs          AuditLog[]           @relation("AuditAdmin")
+
+  @@index([role, status])
+  @@index([createdAt])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Plan {
+  id           String     @id @default(cuid())
+  name         String     @unique
+  description  String
+  price         Decimal
+  currency     String     @default("USD")
+  cryptoPrice  Json?
+  credits      Int
+  durationDays Int
+  active       Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  userPlans    UserPlan[]
+  payments     Payment[]
+
+  @@index([active])
+}
+
+model UserPlan {
+  id             String         @id @default(cuid())
+  userId         String
+  planId         String
+  status         UserPlanStatus @default(ACTIVE)
+  creditsGranted Int
+  startsAt       DateTime       @default(now())
+  expiresAt      DateTime
+  assignedById   String?
+  paymentId      String?        @unique
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  user           User           @relation("UserPlans", fields: [userId], references: [id], onDelete: Cascade)
+  plan           Plan           @relation(fields: [planId], references: [id])
+  assignedBy     User?          @relation("AssignedPlans", fields: [assignedById], references: [id])
+  payment        Payment?       @relation(fields: [paymentId], references: [id])
+
+  @@index([userId, status, expiresAt])
+  @@index([planId])
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  userId          String
+  planId          String
+  cryptocurrency  String
+  amount          Decimal
+  walletAddress   String
+  transactionHash String?
+  proofImage      String?
+  telegramHandle  String?
+  status          PaymentStatus @default(PENDING)
+  expiresAt       DateTime
+  createdAt       DateTime      @default(now())
+  reviewedAt      DateTime?
+  reviewedById    String?
+  adminNote       String?
+  user            User          @relation("UserPayments", fields: [userId], references: [id], onDelete: Cascade)
+  plan            Plan          @relation(fields: [planId], references: [id])
+  reviewedBy      User?         @relation("ReviewedPayments", fields: [reviewedById], references: [id])
+  activatedPlan   UserPlan?
+
+  @@index([cryptocurrency, transactionHash])
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Search {
+  id                 String              @id @default(cuid())
+  userId             String
+  name               String
+  mode               ScanMode
+  status             SearchStatus        @default(QUEUED)
+  domainCount        Int
+  processedCount     Int                 @default(0)
+  emailsFound        Int                 @default(0)
+  creditsCharged     Int
+  error              String?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  domains            Domain[]
+  creditTransactions CreditTransaction[]
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model Domain {
+  id           String        @id @default(cuid())
+  searchId     String
+  hostname     String
+  status       DomainStatus  @default(QUEUED)
+  error        String?
+  pagesScanned Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  search       Search        @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  results      EmailResult[]
+  scanJob      ScanJob?
+
+  @@unique([searchId, hostname])
+  @@index([searchId, status])
+}
+
+model EmailResult {
+  id         String   @id @default(cuid())
+  domainId   String
+  email      String
+  emailType  String
+  sourceUrl  String
+  sourceType String
+  confidence Int
+  status     String   @default("FOUND")
+  foundAt    DateTime @default(now())
+  domain     Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@unique([domainId, email, sourceUrl])
+  @@index([domainId, foundAt])
+  @@index([email])
+}
+
+model ScanJob {
+  id          String        @id @default(cuid())
+  domainId    String        @unique
+  queueJobId  String?       @unique
+  status      ScanJobStatus @default(QUEUED)
+  attempts    Int           @default(0)
+  lastError   String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  domain      Domain        @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model CreditTransaction {
+  id        String                @id @default(cuid())
+  userId    String
+  amount    Int
+  type      CreditTransactionType
+  reason    String
+  searchId  String?
+  adminId   String?
+  createdAt DateTime              @default(now())
+  user      User                  @relation("UserCreditTransactions", fields: [userId], references: [id], onDelete: Cascade)
+  search    Search?               @relation(fields: [searchId], references: [id])
+  admin     User?                 @relation("AdminCreditTransactions", fields: [adminId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([searchId])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  adminId    String?
+  action     String
+  targetType String
+  targetId   String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+  admin      User?    @relation("AuditAdmin", fields: [adminId], references: [id])
+
+  @@index([createdAt])
+  @@index([adminId, createdAt])
+  @@index([targetType, targetId])
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  isPublic  Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([isPublic])
+}

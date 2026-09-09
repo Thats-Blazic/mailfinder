@@ -1,0 +1,35 @@
+node_modules/
+.next/
+dist/
+coverage/
+uploads/
+
+prisma/*.db
+prisma/*.db-journal
+dev.db
+dev.db-journal
+
+.env
+.env.local
+.env.*.local
+!.env.example
+
+*.log
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+# v0 sandbox internal files
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+.snowflake/
+.v0-trash/
+.vercel/
+
+# Environment variables
+.env*.local
+
+# Common ignores
+node_modules
+.next/
+.DS_Store
